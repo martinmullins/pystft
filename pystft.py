@@ -5,61 +5,77 @@ import pyaudio
 import scipy
 import scipy.fftpack
 import scipy.io.wavfile
+import numpy as np
 import wave
+import sys
 
-rate=12000 #try 5000 for HD data, 48000 for realtime
+#TODO make these configurable from the command line
+rate=12000 
 soundcard=3
 windowWidth=500
 fftsize=512
-currentCol=0
 scooter=[]
-overlap=4 #1 for raw, realtime - 8 or 16 for high-definition
+overlap=4 
+window = scipy.hanning(fftsize+1)[1:]
 
-def graphFFT(pcm):
-	global currentCol, data
-	ffty=scipy.fftpack.fft(pcm) #convert WAV to FFT
-	ffty=abs(ffty[0:len(ffty)/2])/500 #FFT is mirror-imaged
-	#ffty=(scipy.log(ffty))*30-50 # if you want uniform data
-	print "MIN:t%stMAX:t%s"%(min(ffty),max(ffty))
-	for i in range(len(ffty)):
-		if ffty[i]<0: ffty[i]=0
-		if ffty[i]>255: ffty[i]=255
-        #scooter.append(ffty)
-	#if len(scooter)<6:return
-	#scooter.pop(0)
-	#ffty=(scooter[0]+scooter[1]*2+scooter[2]*3+scooter[3]*2+scooter[4])/9
-	data=numpy.roll(data,-1,0)
-	data[-1]=ffty[::-1]
-	currentCol+=1
-	if currentCol==windowWidth: currentCol=0
+#TODO stftbuf is thread safe?
+def record(args):
+    TODO = args 
+    global stftbuf
 
-def record():
-	p = pyaudio.PyAudio()
-	inStream = p.open(format=pyaudio.paInt16,channels=1,rate=rate,input=True)
-	linear=[0]*fftsize
-	while True:
-		linear=linear[fftsize/overlap:]
-		pcm=numpy.fromstring(inStream.read(fftsize/overlap), dtype=numpy.int16)
-		linear=numpy.append(linear,pcm)
-		graphFFT(linear)
+    p = pyaudio.PyAudio()
+    inStream = p.open(format=pyaudio.paInt16,
+                        channels=1,
+                        rate=rate,
+                        input=True)
 
-pal = [(max((x-128)*2,0),x,min(x*2,255)) for x in xrange(256)]
-print max(pal),min(pal)
-data=numpy.array(numpy.zeros((windowWidth,fftsize/2)),dtype=int)
-#data=Numeric.array(data) # for older PyGame that requires Numeric
-pygame.init() #crank up PyGame
-pygame.display.set_caption("Simple Spectrograph")
-screen=pygame.display.set_mode((windowWidth,fftsize/2))
-world=pygame.Surface((windowWidth,fftsize/2),depth=8) # MAIN SURFACE
-world.set_palette(pal)
-t_rec=threading.Thread(target=record) # make thread for record()
-t_rec.daemon=True # daemon mode forces thread to quit with program
-t_rec.start() #launch thread
-clk=pygame.time.Clock()
-while 1:
-	for event in pygame.event.get(): #check if we need to exit
-		if event.type == pygame.QUIT:pygame.quit();sys.exit()
-	pygame.surfarray.blit_array(world,data) #place data in window
-	screen.blit(world, (0,0))
-	pygame.display.flip() #RENDER WINDOW
-	clk.tick(30) #limit to 30FPS
+    buff = numpy.zeros(fftsize,dtype=numpy.int16)#TODO circular buffer, what is fast?
+    while True:
+        shift = fftsize/overlap
+        buff = numpy.append(buff[shift:],
+                numpy.fromstring(inStream.read(shift), dtype=numpy.int16))
+
+        fft = scipy.fft(window*buff)
+        # TODO fft normalization
+        fft = np.abs(fft[:fftsize/2])/fftsize * 0.5
+
+        stftbuf=numpy.roll(stftbuf,-1,0)
+        stftbuf[-1]=fft[::-1]
+
+def main():
+    global stftbuf
+
+    pygame.init()
+    pygame.display.set_caption("PYSTFT")
+    screen=pygame.display.set_mode((windowWidth,fftsize/2))
+
+    world=pygame.Surface((windowWidth,fftsize/2),depth=8)
+    # TODO make pallette configurable
+    pal = [(max((x-128)*2,0),x,min(x*2,255)) for x in xrange(256)]
+    world.set_palette(pal)
+
+    stftbuf=numpy.array(numpy.zeros((windowWidth,fftsize/2)),dtype=int)
+
+    t_rec=threading.Thread(target=record,args=(stftbuf,))
+    t_rec.daemon=True 
+    t_rec.start() 
+    clk=pygame.time.Clock()
+
+    # main "game" loop
+    while True:
+        # handle events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+        pygame.surfarray.blit_array(world,stftbuf) 
+        screen.blit(world, (0,0))
+        pygame.display.flip() 
+        clk.tick(30) #limit to 30FPS
+
+    return 0
+
+if __name__=='__main__':
+    sys.exit(main())
+
