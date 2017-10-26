@@ -30,7 +30,7 @@ def usage():
 def main():
     try:
         fn = sys.argv[1]
-    except (IndexError, TypeError), e:
+    except IndexError, e:
         usage()
         return 2
 
