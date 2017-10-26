@@ -37,7 +37,7 @@ def record(args):
 
         fft = scipy.fft(window*buff)
         # TODO fft normalization
-        fft = np.abs(fft[:fftsize/2])/fftsize * 0.5
+        fft = np.abs(fft[:fftsize/2])/fftsize * 0.25
 
         stftbuf=numpy.roll(stftbuf,-1,0)
         stftbuf[-1]=fft[::-1]
